@@ -356,7 +356,7 @@ class PbfFileReader:
                 warnings.warn(
                     (
                         "Found existing result file with `.geoparquet` extension."
-                        " Users are enouraged to change the extension manually"
+                        " Users are encouraged to change the extension manually"
                         " to `.parquet` for old files. Files with `.geoparquet`"
                         " extension will be backwards supported, but reusing them"
                         " will result in this warning."
@@ -577,7 +577,7 @@ class PbfFileReader:
             warnings.warn(
                 (
                     "Found existing result file with `.geoparquet` extension."
-                    " Users are enouraged to change the extension manually"
+                    " Users are encouraged to change the extension manually"
                     " to `.parquet` for old files. Files with `.geoparquet`"
                     " extension will be backwards supported, but reusing them"
                     " will result in this warning."
@@ -1656,12 +1656,58 @@ class PbfFileReader:
                     tries -= 1
 
     def _prepare_debug_directory(self) -> Path:
-        if self.debug_memory:
-            dir_path = Path(self.working_directory) / "debug" / secrets.token_hex(16)
-            self._delete_directories(dir_path, override_debug=True)
-            dir_path.mkdir(exist_ok=True, parents=True)
-            return dir_path
-        raise RuntimeError("Cannot prepare debug directory when debug mode is not activated.")
+        if not self.debug_memory:
+            raise RuntimeError("Cannot prepare debug directory when debug mode is not activated.")
+        dir_path = Path(self.working_directory) / "debug" / secrets.token_hex(16)
+        self._delete_directories(dir_path, override_debug=True)
+        dir_path.mkdir(exist_ok=True, parents=True)
+        return dir_path
+
+    def _process_single_filter_tag_value(
+            self,
+            positive_filter_clauses: list[str],
+            filter_tag_key: str,
+            single_filter_tag_value: str,
+    ) -> None:
+        if "*" in single_filter_tag_value:
+            sql_like_value = self._replace_star_value_in_string(
+                single_filter_tag_value
+            )
+            positive_filter_clauses.append(
+                f"(list_extract(map_extract(tags, '{filter_tag_key}'), 1) LIKE"
+                f" '{sql_like_value}')"
+            )
+        else:
+            escaped_value = self._sql_escape(single_filter_tag_value)
+            positive_filter_clauses.append(
+                f"(list_extract(map_extract(tags, '{filter_tag_key}'), 1) ="
+                f" '{escaped_value}')"
+            )
+
+    def _process_merged_tag_filter(self,
+            positive_filter_clauses: list[str],
+            negative_filter_clauses: list[str],
+            filter_tag_key: str,
+            filter_tag_value: Union[bool, str, list[str], Any],
+        ) -> None:
+        if filter_tag_value == True:  # noqa: E712
+            positive_filter_clauses.append(
+                f"(list_contains(map_keys(tags), '{filter_tag_key}'))"
+            )
+        elif filter_tag_value == False:  # noqa: E712
+            negative_filter_clauses.append(
+                f"(not list_contains(map_keys(tags), '{filter_tag_key}'))"
+            )
+        elif isinstance(filter_tag_value, (str, list)):
+            filter_tag_values = filter_tag_value
+            if isinstance(filter_tag_value, str):
+                filter_tag_values = [filter_tag_value]
+            for single_filter_tag_value in filter_tag_values:
+                self._process_single_filter_tag_value(
+                    positive_filter_clauses,
+                    filter_tag_key,
+                    single_filter_tag_value,
+                )
 
     def _generate_osm_tags_sql_filter(self) -> str:
         """Prepare features filter clauses based on tags filter."""
@@ -1669,37 +1715,13 @@ class PbfFileReader:
         negative_filter_clauses: list[str] = []
 
         if self.merged_tags_filter:
-            positive_filter_clauses.clear()
-
             for filter_tag_key, filter_tag_value in self.merged_tags_filter.items():
-                if filter_tag_value == True:  # noqa: E712
-                    positive_filter_clauses.append(
-                        f"(list_contains(map_keys(tags), '{filter_tag_key}'))"
-                    )
-                elif filter_tag_value == False:  # noqa: E712
-                    negative_filter_clauses.append(
-                        f"(not list_contains(map_keys(tags), '{filter_tag_key}'))"
-                    )
-                elif isinstance(filter_tag_value, (str, list)):
-                    filter_tag_values = filter_tag_value
-                    if isinstance(filter_tag_value, str):
-                        filter_tag_values = [filter_tag_value]
-                    for single_filter_tag_value in filter_tag_values:
-                        if "*" in single_filter_tag_value:
-                            sql_like_value = self._replace_star_value_in_string(
-                                single_filter_tag_value
-                            )
-                            positive_filter_clauses.append(
-                                f"(list_extract(map_extract(tags, '{filter_tag_key}'), 1) LIKE"
-                                f" '{sql_like_value}')"
-                            )
-                        else:
-                            escaped_value = self._sql_escape(single_filter_tag_value)
-                            positive_filter_clauses.append(
-                                f"(list_extract(map_extract(tags, '{filter_tag_key}'), 1) ="
-                                f" '{escaped_value}')"
-                            )
-
+                self._process_merged_tag_filter(
+                    positive_filter_clauses,
+                    negative_filter_clauses,
+                    filter_tag_key,
+                    filter_tag_value,
+                )
         if not positive_filter_clauses:
             positive_filter_clauses.append("(1=1)")
 
