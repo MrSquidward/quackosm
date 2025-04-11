@@ -1,8 +1,7 @@
 """
 OpenStreetMap extracts.
 
-This module contains iterators for publically available OpenStreetMap `*.osm.pbf` files
-repositories.
+This module contains iterators for publicly available OpenStreetMap `*.osm.pbf` files repositories.
 """
 
 import difflib
@@ -122,76 +121,81 @@ def get_extract_by_query(
         OpenStreetMapExtract: Found extract.
     """
     try:
-        source_enum = OsmExtractSource(source)
-        index = OSM_EXTRACT_SOURCE_INDEX_FUNCTION.get(source_enum, _get_combined_index)()
-
-        matching_index_row: pd.Series = None
-
-        file_name_matched_rows = (index["file_name"].str.lower() == query.lower().strip()) | (
-            index["file_name"].str.replace("_", " ").str.lower()
-            == query.lower().replace("_", " ").strip()
-        )
-        extract_name_matched_rows = (index["name"].str.lower() == query.lower().strip()) | (
-            index["name"].str.replace("_", " ").str.lower()
-            == query.lower().replace("_", " ").strip()
-        )
-
-        # full file name matched
-        if sum(file_name_matched_rows) == 1:
-            matching_index_row = index[file_name_matched_rows].iloc[0]
-        # single name matched
-        elif sum(extract_name_matched_rows) == 1:
-            matching_index_row = index[extract_name_matched_rows].iloc[0]
-        # multiple names matched
-        elif extract_name_matched_rows.any():
-            matching_rows = index[extract_name_matched_rows]
-            matching_full_names = sorted(matching_rows["file_name"])
-            full_names = ", ".join(f'"{full_name}"' for full_name in matching_full_names)
-
-            raise OsmExtractMultipleMatchesError(
-                f'Multiple extracts matched by query "{query.strip()}".\n'
-                f"Matching extracts full names: {full_names}.",
-                matching_full_names=matching_full_names,
-            )
-        # zero names matched
-        elif not extract_name_matched_rows.any():
-            matching_full_names = []
-            suggested_query_names = difflib.get_close_matches(
-                query.lower(), index["name"].str.lower().unique(), n=5, cutoff=0.7
-            )
-
-            if suggested_query_names:
-                for suggested_query_name in suggested_query_names:
-                    found_extracts = index[index["name"].str.lower() == suggested_query_name]
-                    matching_full_names.extend(found_extracts["file_name"])
-                full_names = ", ".join(matching_full_names)
-                full_names = ", ".join(f'"{full_name}"' for full_name in matching_full_names)
-                exception_message = (
-                    f'Zero extracts matched by query "{query}".\n'
-                    f"Found full names close to query: {full_names}."
-                )
-            else:
-                exception_message = (
-                    f'Zero extracts matched by query "{query}".\n'
-                    "Zero close matches have been found."
-                )
-
-            raise OsmExtractZeroMatchesError(
-                exception_message,
-                matching_full_names=matching_full_names,
-            )
-
-        return OpenStreetMapExtract(
-            id=matching_index_row["id"],
-            name=matching_index_row["name"],
-            parent=matching_index_row["parent"],
-            url=matching_index_row["url"],
-            geometry=matching_index_row["geometry"],
-            file_name=matching_index_row["file_name"],
-        )
-
+        return _get_extract_by_query(query, source)
     except ValueError as ex:
         raise ValueError(f"Unknown OSM extracts source: {source}.") from ex
+
+
+def _get_extract_by_query(
+    query: str, source: Union[OsmExtractSource, str] = "any"
+) -> OpenStreetMapExtract:
+    source_enum = OsmExtractSource(source)
+    index = OSM_EXTRACT_SOURCE_INDEX_FUNCTION.get(source_enum, _get_combined_index)()
+
+    matching_index_row: pd.Series = None
+
+    file_name_matched_rows = (index["file_name"].str.lower() == query.lower().strip()) | (
+        index["file_name"].str.replace("_", " ").str.lower()
+        == query.lower().replace("_", " ").strip()
+    )
+    extract_name_matched_rows = (index["name"].str.lower() == query.lower().strip()) | (
+        index["name"].str.replace("_", " ").str.lower()
+        == query.lower().replace("_", " ").strip()
+    )
+
+    # full file name matched
+    if sum(file_name_matched_rows) == 1:
+        matching_index_row = index[file_name_matched_rows].iloc[0]
+    # single name matched
+    elif sum(extract_name_matched_rows) == 1:
+        matching_index_row = index[extract_name_matched_rows].iloc[0]
+    # multiple names matched
+    elif extract_name_matched_rows.any():
+        matching_rows = index[extract_name_matched_rows]
+        matching_full_names = sorted(matching_rows["file_name"])
+        full_names = ", ".join(f'"{full_name}"' for full_name in matching_full_names)
+
+        raise OsmExtractMultipleMatchesError(
+            f'Multiple extracts matched by query "{query.strip()}".\n'
+            f"Matching extracts full names: {full_names}.",
+            matching_full_names=matching_full_names,
+        )
+    # zero names matched
+    elif not extract_name_matched_rows.any():
+        matching_full_names = []
+        suggested_query_names = difflib.get_close_matches(
+            query.lower(), index["name"].str.lower().unique(), n=5, cutoff=0.7
+        )
+
+        if suggested_query_names:
+            for suggested_query_name in suggested_query_names:
+                found_extracts = index[index["name"].str.lower() == suggested_query_name]
+                matching_full_names.extend(found_extracts["file_name"])
+            full_names = ", ".join(matching_full_names)
+            full_names = ", ".join(f'"{full_name}"' for full_name in matching_full_names)
+            exception_message = (
+                f'Zero extracts matched by query "{query}".\n'
+                f"Found full names close to query: {full_names}."
+            )
+        else:
+            exception_message = (
+                f'Zero extracts matched by query "{query}".\n'
+                "Zero close matches have been found."
+            )
+
+        raise OsmExtractZeroMatchesError(
+            exception_message,
+            matching_full_names=matching_full_names,
+        )
+
+    return OpenStreetMapExtract(
+        id=matching_index_row["id"],
+        name=matching_index_row["name"],
+        parent=matching_index_row["parent"],
+        url=matching_index_row["url"],
+        geometry=matching_index_row["geometry"],
+        file_name=matching_index_row["file_name"],
+    )
 
 
 @overload
@@ -470,7 +474,7 @@ def _find_smallest_containing_extracts(
     geometry. Some extracts might be discarded because of low IoU metric value leaving some parts
     of the geometry uncovered.
 
-    Geometry will be flattened into singluar geometries if it's `BaseMultipartGeometry`.
+    Geometry will be flattened into singular geometries if it's `BaseMultipartGeometry`.
 
     Args:
         geometry (Union[BaseGeometry, BaseMultipartGeometry]): Geometry to be covered.
@@ -479,7 +483,7 @@ def _find_smallest_containing_extracts(
             Defaults to -1 which results in a total number of available cpu threads.
             `0` and `1` values disable multiprocessing.
             Similar to `n_jobs` parameter from `scikit-learn` library.
-        multiprocessing_activation_threshold (int, optional): Number of gometries required to start
+        multiprocessing_activation_threshold (int, optional): Number of geometries required to start
             processing on multiple processes. Activating multiprocessing for a small
             amount of points might not be feasible. Defaults to 100.
         geometry_coverage_iou_threshold (float): Minimal value of the Intersection over Union metric
@@ -639,10 +643,7 @@ def _cover_geometry_with_extracts(
     checked_extracts_ids: list[str] = []
     iou_metric_values: list[float] = []
 
-    if geometry.geom_type == "Polygon":
-        geometry_to_cover = geometry.buffer(0)
-    else:
-        geometry_to_cover = geometry.buffer(1e-6)
+    geometry_to_cover = _create_buffer_around_geometry(geometry)
 
     exactly_matching_geometry = polygons_index_gdf.loc[
         polygons_index_gdf.geometry.geom_equals_exact(geometry, tolerance=1e-6)
@@ -661,7 +662,7 @@ def _cover_geometry_with_extracts(
             if not allow_uncovered_geometry:
                 raise GeometryNotCoveredError(
                     "Couldn't find extracts covering given geometry."
-                    " If it's expected behaviour, you can suppress this error by passing"
+                    " If it's expected behavior, you can suppress this error by passing"
                     " the `allow_uncovered_geometry=True` argument"
                     " or add `--allow-uncovered-geometry` flag to the CLI command."
                 )
@@ -705,7 +706,7 @@ def _filter_extracts(
         polygons_index_gdf (gpd.GeoDataFrame): Index of available extracts.
         num_of_multiprocessing_workers (int): Number of workers used for multiprocessing.
             Similar to `n_jobs` parameter from `scikit-learn` library.
-        multiprocessing_activation_threshold (int): Number of gometries required to start
+        multiprocessing_activation_threshold (int): Number of geometries required to start
             processing on multiple processes.
 
     Raises:
@@ -790,10 +791,7 @@ def _filter_extracts_for_single_geometry(
     """
     filtered_extracts_ids: set[str] = set()
 
-    if geometry.geom_type == "Polygon":
-        geometry_to_cover = geometry.buffer(0)
-    else:
-        geometry_to_cover = geometry.buffer(1e-6)
+    geometry_to_cover = _create_buffer_around_geometry(geometry)
 
     for _, extract_row in sorted_extracts_gdf.iterrows():
         if geometry_to_cover.is_empty:
@@ -847,12 +845,18 @@ def _simplify_selected_extracts(
 
 def _flatten_geometry(geometry: BaseGeometry) -> list[BaseGeometry]:
     """Flatten all geometries into a list of BaseGeometries."""
-    if isinstance(geometry, BaseMultipartGeometry):
-        geometries = []
-        for sub_geom in geometry.geoms:
-            geometries.extend(_flatten_geometry(sub_geom))
-        return geometries
-    return [geometry]
+    if not isinstance(geometry, BaseMultipartGeometry):
+        return [geometry]
+    geometries = []
+    for sub_geom in geometry.geoms:
+        geometries.extend(_flatten_geometry(sub_geom))
+    return geometries
+
+
+def _create_buffer_around_geometry(geometry: BaseGeometry) -> BaseGeometry:
+    if geometry.geom_type == "Polygon":
+        return geometry.buffer(0)
+    return geometry.buffer(1e-6)
 
 
 find_smallest_containing_extract = deprecate(
