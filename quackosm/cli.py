@@ -3,15 +3,18 @@
 import json
 import logging
 from pathlib import Path
-from typing import Annotated, Literal, Optional, Union, cast
+from typing import TYPE_CHECKING, Annotated, Optional, Union, cast
 
 import click
 import typer
+from rq_geo_toolkit._geopandas_api_version import GEOPANDAS_NEW_API
 
-from quackosm._geopandas_api_version import GEOPANDAS_NEW_API
 from quackosm._osm_tags_filters import GroupedOsmTagsFilter, OsmTagsFilter
 from quackosm.osm_extracts.extract import OsmExtractSource
 from quackosm.pbf_file_reader import _is_url_path
+
+if TYPE_CHECKING:
+    from quackosm._rich_progress import VERBOSITY_MODE
 
 app = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]}, rich_markup_mode="rich")
 
@@ -183,22 +186,31 @@ class H3GeometryParser(click.ParamType):  # type: ignore
         if not value:
             return None
 
-        try:
-            import geopandas as gpd
-            import h3
-            from shapely.geometry import Polygon
+        import duckdb
+        import geopandas as gpd
+        from shapely import from_wkt
 
-            geometries = []  # noqa: FURB138
-            for h3_cell in value.split(","):
-                geometries.append(
-                    Polygon([coords[::-1] for coords in h3.cell_to_boundary(h3_cell.strip())])
-                )
-            if GEOPANDAS_NEW_API:
-                return gpd.GeoSeries(geometries).union_all()
-            else:
-                return gpd.GeoSeries(geometries).unary_union
-        except Exception as ex:
-            raise typer.BadParameter(f"Cannot parse provided H3 values: {value}") from ex
+        duckdb.install_extension("h3", repository="community")
+        duckdb.load_extension("h3")
+
+        geometries = []  # noqa: FURB138
+        for h3_index in value.split(","):
+            stripped_h3_index = h3_index.strip()
+            if not duckdb.sql(f"SELECT h3_is_valid_cell('{stripped_h3_index}')").fetchone()[0]:
+                raise typer.BadParameter(
+                    f"Cannot parse provided H3 value: {stripped_h3_index}"
+                ) from None
+
+            parsed_geometry = from_wkt(
+                duckdb.sql(f"SELECT h3_cell_to_boundary_wkt('{stripped_h3_index}')").fetchone()[0]
+            )
+
+            geometries.append(parsed_geometry)
+
+        if not GEOPANDAS_NEW_API:
+            return gpd.GeoSeries(geometries).unary_union
+
+        return gpd.GeoSeries(geometries).union_all()
 
 
 class S2GeometryParser(click.ParamType):  # type: ignore
@@ -211,22 +223,30 @@ class S2GeometryParser(click.ParamType):  # type: ignore
         if not value:
             return None
 
-        try:
-            import geopandas as gpd
-            from s2 import s2
-            from shapely.geometry import Polygon
+        import geopandas as gpd
+        import s2sphere
+        from shapely import Polygon
 
-            geometries = []  # noqa: FURB138
-            for s2_index in value.split(","):
+        geometries = []  # noqa: FURB138
+        for s2_index in value.split(","):
+            stripped_s2_index = s2_index.strip()
+            try:
+                s2_cell = s2sphere.Cell(s2sphere.CellId.from_token(stripped_s2_index))
+                points = [
+                    s2sphere.LatLng.from_point(s2_cell.get_vertex(i)) for i in (0, 1, 2, 3, 0)
+                ]
                 geometries.append(
-                    Polygon(s2.s2_to_geo_boundary(s2_index.strip(), geo_json_conformant=True))
+                    Polygon([[point.lng().degrees, point.lat().degrees] for point in points])
                 )
-            if GEOPANDAS_NEW_API:
-                return gpd.GeoSeries(geometries).union_all()
-            else:
-                return gpd.GeoSeries(geometries).unary_union
-        except Exception:
-            raise typer.BadParameter(f"Cannot parse provided S2 value: {s2_index}") from None
+            except Exception:
+                raise typer.BadParameter(
+                    f"Cannot parse provided S2 value: {stripped_s2_index}"
+                ) from None
+
+        if not GEOPANDAS_NEW_API:
+            return gpd.GeoSeries(geometries).unary_union
+
+        return gpd.GeoSeries(geometries).union_all()
 
 
 class OsmTagsFilterJsonParser(click.ParamType):  # type: ignore
@@ -597,6 +617,22 @@ def main(
             show_default=False,
         ),
     ] = None,
+    sort_result: Annotated[
+        bool,
+        typer.Option(
+            "--sort/--no-sort",
+            help="Whether to sort the final geoparquet file by geometry or not.",
+            show_default=True,
+        ),
+    ] = True,
+    ignore_metadata_tags: Annotated[
+        bool,
+        typer.Option(
+            "--ignore-metadata-tags/--keep-metadata-tags",
+            help="Whether to remove metadata tags, based on the default GDAL config.",
+            show_default=True,
+        ),
+    ] = True,
     wkt_result: Annotated[
         bool,
         typer.Option(
@@ -726,12 +762,15 @@ def main(
     if transient_mode and silent_mode:
         raise typer.BadParameter("Cannot pass both silent and transient mode at once.")
 
-    verbosity_mode: Literal["silent", "transient", "verbose"] = "verbose"
+    verbosity_mode: VERBOSITY_MODE = "verbose"
 
     if transient_mode:
         verbosity_mode = "transient"
     elif silent_mode:
         verbosity_mode = "silent"
+
+    if wkt_result and sort_result:
+        sort_result = False
 
     logging.disable(logging.CRITICAL)
 
@@ -761,8 +800,10 @@ def main(
                 if osm_way_polygon_features_config
                 else None
             ),
+            ignore_metadata_tags=ignore_metadata_tags,
             filter_osm_ids=filter_osm_ids,  # type: ignore
             custom_sql_filter=custom_sql_filter,
+            sort_result=sort_result,
             save_as_wkt=wkt_result,
             verbosity_mode=verbosity_mode,
         )
@@ -783,8 +824,10 @@ def main(
                 if osm_way_polygon_features_config
                 else None
             ),
+            ignore_metadata_tags=ignore_metadata_tags,
             filter_osm_ids=filter_osm_ids,  # type: ignore
             custom_sql_filter=custom_sql_filter,
+            sort_result=sort_result,
             duckdb_table_name=duckdb_table_name or "quackosm",
             verbosity_mode=verbosity_mode,
         )
@@ -808,8 +851,10 @@ def main(
                     if osm_way_polygon_features_config
                     else None
                 ),
+                ignore_metadata_tags=ignore_metadata_tags,
                 filter_osm_ids=filter_osm_ids,  # type: ignore
                 custom_sql_filter=custom_sql_filter,
+                sort_result=sort_result,
                 save_as_wkt=wkt_result,
                 verbosity_mode=verbosity_mode,
             )
@@ -839,8 +884,10 @@ def main(
                     if osm_way_polygon_features_config
                     else None
                 ),
+                ignore_metadata_tags=ignore_metadata_tags,
                 filter_osm_ids=filter_osm_ids,  # type: ignore
                 custom_sql_filter=custom_sql_filter,
+                sort_result=sort_result,
                 duckdb_table_name=duckdb_table_name or "quackosm",
                 save_as_wkt=wkt_result,
                 verbosity_mode=verbosity_mode,
@@ -868,8 +915,10 @@ def main(
                 if osm_way_polygon_features_config
                 else None
             ),
+            ignore_metadata_tags=ignore_metadata_tags,
             filter_osm_ids=filter_osm_ids,  # type: ignore
             custom_sql_filter=custom_sql_filter,
+            sort_result=sort_result,
             save_as_wkt=wkt_result,
             verbosity_mode=verbosity_mode,
             geometry_coverage_iou_threshold=geometry_coverage_iou_threshold,
@@ -892,9 +941,11 @@ def main(
                 if osm_way_polygon_features_config
                 else None
             ),
+            ignore_metadata_tags=ignore_metadata_tags,
             filter_osm_ids=filter_osm_ids,  # type: ignore
             custom_sql_filter=custom_sql_filter,
             duckdb_table_name=duckdb_table_name or "quackosm",
+            sort_result=sort_result,
             save_as_wkt=wkt_result,
             verbosity_mode=verbosity_mode,
             geometry_coverage_iou_threshold=geometry_coverage_iou_threshold,

@@ -1,20 +1,24 @@
 """Tests related to OSM extracts."""
 
+import datetime
 from contextlib import nullcontext as does_not_raise
 from typing import Any
 from unittest import TestCase
 
 import pandas as pd
 import pytest
+from dateutil.relativedelta import relativedelta
 from parametrization import Parametrization as P
 from pytest_mock import MockerFixture
 from rich.console import Console
-from shapely import from_wkt
+from shapely import box, from_wkt
 from shapely.geometry.base import BaseGeometry
 
 from quackosm._exceptions import (
     GeometryNotCoveredError,
     GeometryNotCoveredWarning,
+    MissingOsmCacheWarning,
+    OldOsmCacheWarning,
     OsmExtractIndexOutdatedWarning,
     OsmExtractMultipleMatchesError,
     OsmExtractZeroMatchesError,
@@ -22,12 +26,18 @@ from quackosm._exceptions import (
 from quackosm.geocode import geocode_to_geometry
 from quackosm.osm_extracts import (
     OsmExtractSource,
+    clear_osm_index_cache,
     display_available_extracts,
     find_smallest_containing_extracts,
     find_smallest_containing_extracts_total,
     get_extract_by_query,
 )
-from quackosm.osm_extracts.extract import _get_full_file_name_function, _get_global_cache_file_path
+from quackosm.osm_extracts.extract import (
+    OpenStreetMapExtract,
+    _get_full_file_name_function,
+    _get_global_cache_file_path,
+    _get_local_cache_file_path,
+)
 from quackosm.osm_extracts.geofabrik import _load_geofabrik_index
 
 ut = TestCase()
@@ -54,7 +64,7 @@ ut = TestCase()
     "OSM fr without underscore",
     "osmfr",
 )  # type: ignore
-def test_proper_osm_extract_source(value: str):
+def test_proper_osm_extract_source(value: str) -> None:
     """Test if OsmExtractSource is parsed correctly."""
     OsmExtractSource(value)
 
@@ -126,7 +136,9 @@ def test_wrong_osm_extract_source():  # type: ignore
     ),
     "osmfr_north-america_canada_british_columbia",
 )  # type: ignore
-def test_single_smallest_extract(source: str, geometry: BaseGeometry, expected_extract_id: str):
+def test_single_smallest_extract(
+    source: str, geometry: BaseGeometry, expected_extract_id: str
+) -> None:
     """Test if extracts matching works correctly for geometries within borders."""
     extracts = find_smallest_containing_extracts(geometry, source)
     assert len(extracts) == 1
@@ -188,7 +200,7 @@ def test_multiple_smallest_extracts(
     geometry: BaseGeometry,
     geometry_coverage_iou_threshold: float,
     expected_extract_file_names: list[str],
-):
+) -> None:
     """Test if extracts matching works correctly for geometries between borders."""
     extracts = find_smallest_containing_extracts(
         geometry, source, geometry_coverage_iou_threshold=geometry_coverage_iou_threshold
@@ -207,8 +219,8 @@ def test_multiple_smallest_extracts(
     ],
 )  # type: ignore
 def test_uncovered_geometry_extract(
-    expectation, allow_uncovered_geometry: bool, geometry_coverage_iou_threshold: float
-):
+    expectation: Any, allow_uncovered_geometry: bool, geometry_coverage_iou_threshold: float
+) -> None:
     """Test if raises errors as expected when geometry can't be covered."""
     with expectation:
         geometry = from_wkt(
@@ -374,7 +386,7 @@ def test_extracts_finding(
     list(OsmExtractSource),
 )  # type: ignore
 def test_extracts_tree_printing(
-    capfd, mocker: MockerFixture, osm_source: OsmExtractSource, use_full_names: bool
+    capfd: Any, mocker: MockerFixture, osm_source: OsmExtractSource, use_full_names: bool
 ) -> None:
     """Test if displaying available extracts works."""
     mocker.patch("rich.get_console", return_value=Console(width=999))
@@ -401,3 +413,109 @@ def test_extracts_tree_printing(
         )
 
     assert error_output == ""
+
+
+def test_generate_index_warning(mocker: MockerFixture) -> None:
+    """Test if index generation results in warning."""
+    extract_source = OsmExtractSource.bbbike
+    global_path = _get_global_cache_file_path(extract_source)
+    local_path = _get_local_cache_file_path(extract_source)
+
+    move_global_path = global_path.exists()
+    move_local_path = local_path.exists()
+
+    if move_global_path:
+        global_moved_path = global_path.with_name("bbbike_index_moved.geojson")
+        global_path.rename(global_moved_path)
+
+    if move_local_path:
+        local_moved_path = local_path.with_name("bbbike_index_moved.geojson")
+        local_path.rename(local_moved_path)
+
+    try:
+        mocker.patch(
+            "quackosm.osm_extracts.bbbike._iterate_bbbike_index",
+            return_value=[
+                OpenStreetMapExtract(
+                    id="bbbike_test",
+                    name="test",
+                    parent="bbbike",
+                    url="test_url",
+                    geometry=box(0, 0, 1, 1),
+                )
+            ],
+        )
+        mocker.patch(
+            "quackosm.osm_extracts.bbbike.BBBIKE_INDEX_GDF", new=None
+        )
+        with pytest.warns(MissingOsmCacheWarning):
+            display_available_extracts(source=extract_source)
+
+    finally:
+        if move_global_path:
+            global_path.unlink(missing_ok=True)
+            global_moved_path.rename(global_path)
+            global_moved_path.unlink(missing_ok=True)
+
+        if move_local_path:
+            local_path.unlink(missing_ok=True)
+            local_moved_path.rename(local_path)
+            local_moved_path.unlink(missing_ok=True)
+
+
+def test_old_index_warning(mocker: MockerFixture) -> None:
+    """Test if old index results in warning."""
+    extract_source = OsmExtractSource.bbbike
+
+    mocker.patch(
+        "quackosm.osm_extracts.bbbike._iterate_bbbike_index",
+        return_value=[
+            OpenStreetMapExtract(
+                id="bbbike_test",
+                name="test",
+                parent="bbbike",
+                url="test_url",
+                geometry=box(0, 0, 1, 1),
+            )
+        ],
+    )
+    mocker.patch(
+        "quackosm.osm_extracts.extract._get_file_creation_date",
+        return_value=datetime.datetime.now() - relativedelta(years=1, days=1),
+    )
+    mocker.patch(
+        "quackosm.osm_extracts.bbbike.BBBIKE_INDEX_GDF", new=None
+    )
+
+    with pytest.warns(OldOsmCacheWarning):
+        display_available_extracts(source=extract_source)
+
+def test_cache_clearing() -> None:
+    """Test if cache clearing works."""
+    extract_source = OsmExtractSource.bbbike
+    global_path = _get_global_cache_file_path(extract_source)
+    local_path = _get_local_cache_file_path(extract_source)
+
+    move_global_path = global_path.exists()
+    move_local_path = local_path.exists()
+
+    if move_global_path:
+        global_moved_path = global_path.with_name("bbbike_index_moved.geojson")
+        global_path.rename(global_moved_path)
+
+    if move_local_path:
+        local_moved_path = local_path.with_name("bbbike_index_moved.geojson")
+        local_path.rename(local_moved_path)
+
+    clear_osm_index_cache(extract_source)
+
+    assert not global_path.exists()
+    assert not local_path.exists()
+
+    if move_global_path:
+        global_moved_path.rename(global_path)
+        global_moved_path.unlink(missing_ok=True)
+
+    if move_local_path:
+        local_moved_path.rename(local_path)
+        local_moved_path.unlink(missing_ok=True)

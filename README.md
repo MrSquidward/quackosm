@@ -6,26 +6,15 @@
 <p align="center">
     <img alt="GitHub" src="https://img.shields.io/github/license/kraina-ai/quackosm?logo=apache&logoColor=%23fff">
     <img src="https://img.shields.io/github/checks-status/kraina-ai/quackosm/main?logo=GitHubActions&logoColor=%23fff" alt="Checks">
-    <a href="https://github.com/kraina-ai/quackosm/actions/workflows/ci-dev.yml" target="_blank">
-        <img alt="GitHub Workflow Status - DEV" src="https://img.shields.io/github/actions/workflow/status/kraina-ai/quackosm/ci-dev.yml?label=build-dev&logo=GitHubActions&logoColor=%23fff">
-    </a>
-    <a href="https://github.com/kraina-ai/quackosm/actions/workflows/ci-prod.yml" target="_blank">
-        <img alt="GitHub Workflow Status - PROD" src="https://img.shields.io/github/actions/workflow/status/kraina-ai/quackosm/ci-prod.yml?label=build-prod&logo=GitHubActions&logoColor=%23fff">
-    </a>
-    <a href="https://results.pre-commit.ci/latest/github/kraina-ai/quackosm/main" target="_blank">
-        <img src="https://results.pre-commit.ci/badge/github/kraina-ai/quackosm/main.svg" alt="pre-commit.ci status">
-    </a>
+    <a href="https://github.com/kraina-ai/quackosm/actions/workflows/ci-dev.yml" target="_blank"><img alt="GitHub Workflow Status - DEV" src="https://img.shields.io/github/actions/workflow/status/kraina-ai/quackosm/ci-dev.yml?label=build-dev&logo=GitHubActions&logoColor=%23fff"></a>
+    <a href="https://github.com/kraina-ai/quackosm/actions/workflows/ci-prod.yml" target="_blank"><img alt="GitHub Workflow Status - PROD" src="https://img.shields.io/github/actions/workflow/status/kraina-ai/quackosm/ci-prod.yml?label=build-prod&logo=GitHubActions&logoColor=%23fff"></a>
+    <a href="https://results.pre-commit.ci/latest/github/kraina-ai/quackosm/main" target="_blank"><img src="https://results.pre-commit.ci/badge/github/kraina-ai/quackosm/main.svg" alt="pre-commit.ci status"></a>
     <a href="https://www.codefactor.io/repository/github/kraina-ai/quackosm"><img alt="CodeFactor Grade" src="https://img.shields.io/codefactor/grade/github/kraina-ai/quackosm?logo=codefactor&logoColor=%23fff"></a>
     <a href="https://app.codecov.io/gh/kraina-ai/quackosm/tree/main"><img alt="Codecov" src="https://img.shields.io/codecov/c/github/kraina-ai/quackosm?logo=codecov&token=PRS4E02ZX0&logoColor=%23fff"></a>
-    <a href="https://pypi.org/project/quackosm" target="_blank">
-        <img src="https://img.shields.io/pypi/v/quackosm?color=%2334D058&label=pypi%20package&logo=pypi&logoColor=%23fff" alt="Package version">
-    </a>
-    <a href="https://pypi.org/project/quackosm" target="_blank">
-        <img src="https://img.shields.io/pypi/pyversions/quackosm.svg?color=%2334D058&logo=python&logoColor=%23fff" alt="Supported Python versions">
-    </a>
-    <a href="https://pypi.org/project/quackosm" target="_blank">
-        <img alt="PyPI - Downloads" src="https://img.shields.io/pypi/dm/quackosm">
-    </a>
+    <a href="https://pypi.org/project/quackosm" target="_blank"><img src="https://img.shields.io/pypi/v/quackosm?label=pypi%20package&logo=pypi&logoColor=%23fff" alt="Package version"></a>
+    <a href="https://anaconda.org/conda-forge/quackosm" target="_blank"><img src="https://img.shields.io/conda/vn/conda-forge/quackosm?&logo=anaconda&logoColor=%23fff" alt="Package version"></a>
+    <a href="https://pypi.org/project/quackosm" target="_blank"><img src="https://img.shields.io/pypi/pyversions/quackosm.svg?logo=python&logoColor=%23fff" alt="Supported Python versions"></a>
+    <a href="https://pypi.org/project/quackosm" target="_blank"><img alt="PyPI - Downloads" src="https://img.shields.io/pypi/dm/quackosm"></a>
 </p>
 
 # QuackOSM
@@ -39,7 +28,8 @@ An open-source tool for reading OpenStreetMap PBF files using DuckDB.
 - Saves files in the `GeoParquet`[^3] file format for easier integration with modern cloud stacks.
 - Utilizes multithreading unlike GDAL that works in a single thread only.
 - Can filter data based on geometry without the need for `ogr2ogr` clipping before operation.
-- Can filter data based on OSM tags.
+- Can filter data based on OSM tags (with negations and wildcards).
+- Can automatically download required PBF files for a given geometry.
 - Utilizes caching to reduce repeatable computations.
 - Can be used as Python module as well as a beautiful CLI based on `Typer`[^4].
 
@@ -52,14 +42,25 @@ An open-source tool for reading OpenStreetMap PBF files using DuckDB.
 
 ### As pure Python module
 
-```
+```bash
 pip install quackosm
+# or
+uv pip install quackosm
 ```
 
 ### With beautiful CLI
 
-```
+```bash
 pip install quackosm[cli]
+# or
+uv pip install quackosm[cli]
+```
+
+### From conda-forge
+
+```bash
+# Automatically installs with CLI
+conda install conda-forge::quackosm
 ```
 
 ### Required Python version?
@@ -70,19 +71,17 @@ QuackOSM supports **Python >= 3.9**
 
 Required:
 
-- `duckdb (>=1.1.0)`: For all DuckDB operations on PBF files
+- `duckdb (>=1.1.2)`: For all DuckDB operations on PBF files and sorting result file (with `spatial` extension)
 
 - `pyarrow (>=16.0.0)`: For parquet files wrangling
 
 - `geoarrow-pyarrow (>=0.1.2)`: For GeoParquet IO operations and transforming Arrow data to Shapely objects
 
-- `geoarrow-pandas (>=0.1.1)`: For GeoParquet integration with GeoPandas
-
 - `geopandas (>=0.6)`: For returning GeoDataFrames and reading Geo files
 
 - `shapely (>=2.0)`: For parsing WKT and GeoJSON strings and fixing geometries
 
-- `polars (>=0.19.4)`: For faster OSM ways grouping operation
+- `polars (>=1.9)`: For faster OSM ways grouping operation
 
 - `typeguard (>=3.0)`: For internal validation of types
 
@@ -102,9 +101,9 @@ Optional:
 
 - `typer[all] (>=0.9.0)` (click, colorama, rich, shellingham): Required in CLI
 
-- `h3 (>=4.0.0b1)`: For reading H3 strings. Required in CLI
+- `h3` extension for `duckdb`: For transforming H3 indexes into geometries. Required in CLI
 
-- `s2 (>=0.1.9)`: For transforming S2 indexes into geometries. Required in CLI
+- `s2sphere (>=0.2.5)`: For transforming S2 indexes into geometries. Required in CLI
 
 - `python-geohash (>=0.8)`: For transforming GeoHash indexes into geometries. Required in CLI
 

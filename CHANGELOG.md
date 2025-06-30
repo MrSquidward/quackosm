@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2025-06-28
+
+### Fixed
+
+- Missing working directory when compressing value columns for multiple files at once
+
+## [0.15.0] - 2025-06-16
+
+### Changed
+
+- Removed `h3` and `s2` dependencies from the `cli` group and replaced them with `h3` DuckDB extension and `s2sphere` Python library
+- Applied changes required for the `conda` release [#142](https://github.com/kraina-ai/quackosm/issues/142) [#217](https://github.com/kraina-ai/quackosm/issues/217)
+
+### Removed
+
+- `geoarrow-pandas` from dependencies
+
+## [0.14.2] - 2025-06-14
+
+### Added
+
+- `MissingOsmCacheWarning` for the user to inform that OSM index has to be built and the source can be switched to Geofabrik [#213](https://github.com/kraina-ai/quackosm/issues/213)
+- `OldOsmCacheWarning` for the user to inform that currently saved cache is over 1 year old and it can be outdated [#213](https://github.com/kraina-ai/quackosm/issues/213)
+
+### Changed
+
+- Bumped minimal version of the `h3` library to `4.1.0`
+
+## [0.14.1] - 2025-05-23
+
+### Added
+
+- Option to skip metadata tags filtering, based on a default GDAL configuration
+
+## [0.14.0] - 2025-05-17
+
+### Added
+
+- Option to sort result files by geometry to reduce file size
+- Additional `_sorted` suffix used in the result file name
+- Option to define final parquet file compression with level and number of rows per group
+- Typing stubs for mypy
+
+### Changed
+
+- Default result parquet file compression from `snappy` to `zstd` with level 3
+- Number of rows in a parquet row group to `100000`
+- Bumped minimal version of DuckDB to `1.1.2` and polars to `1.9`
+- Refactored internal logic by exporting it to external `rq_geo_toolkit` library
+- Changed multiple files merging logic
+
+### Fixed
+
+- Replace geo metadata in final geoparquet with proper bounding box size and geometry types
+- Changed polars LazyFrame execution for newer versions
+- Remove wrong empty geometries from relations
+- Steps numbering with complex OSM tags filtering
+
+### Deprecated
+
+- Replaced `parquet_compression` parameter in `PbfFileReader` class with `compression`
+
 ## [0.13.0] - 2025-02-26
 
 ### Changed
@@ -434,7 +496,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Created QuackOSM repository
 - Implemented PbfFileReader
 
-[Unreleased]: https://github.com/kraina-ai/quackosm/compare/0.13.0...HEAD
+[Unreleased]: https://github.com/kraina-ai/quackosm/compare/0.15.1...HEAD
+
+[0.15.1]: https://github.com/kraina-ai/quackosm/compare/0.15.0...0.15.1
+
+[0.15.0]: https://github.com/kraina-ai/quackosm/compare/0.14.2...0.15.0
+
+[0.14.2]: https://github.com/kraina-ai/quackosm/compare/0.14.1...0.14.2
+
+[0.14.1]: https://github.com/kraina-ai/quackosm/compare/0.14.0...0.14.1
+
+[0.14.0]: https://github.com/kraina-ai/quackosm/compare/0.13.0...0.14.0
 
 [0.13.0]: https://github.com/kraina-ai/quackosm/compare/0.12.1...0.13.0
 
